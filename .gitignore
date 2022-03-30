@@ -7,6 +7,16 @@ __pycache__/
 *.so
 
 # Distribution / packaging
+vfcb/
+postprocess_downstream/
+preprocess_data/
+model/
+mlruns/
+mMiniLMv2_xlmr_large_L6/
+mMiniLMv2_xlmr_large_L12/
+data/
+company_stock_model/
+database/
 .Python
 build/
 develop-eggs/
