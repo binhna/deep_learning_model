@@ -1,2 +1,1 @@
-# deep_learning_model
-Deep Learning Model Playaround
+# Deep Learning Model Playaround
