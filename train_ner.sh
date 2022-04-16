@@ -1,10 +1,11 @@
-CUDA_VISIBLE_DEVICES=0 python train_ner.py \
-    --model-path ../../shared_data/roberta-2L-vi \
-    --format flatten \
-    --train-path data/company_stock/train.src \
-    --valid-path data/company_stock/valid.src \
+CUDA_VISIBLE_DEVICES=3 python train_ner.py \
+    --batch-size 64 \
+    --model-path ../shared_data/xlmr_6L \
+    --format conll \
+    --train-path data/mSystemEntity/train \
+    --valid-path data/mSystemEntity/valid \
     --freeze_layer_count 0 \
-    --epoch 10 \
+    --epoch 5 \
     --do-eval \
     --do-train \
-    --output-dir company_stock_model
+    --output-dir model/mSystemEntity

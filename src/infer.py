@@ -1,10 +1,7 @@
 import torch
 from transformers import AutoTokenizer, AutoConfig
 from collections import defaultdict
-import time
-import re
 import os
-import glob
 
 from .model import RobertaNER
 
@@ -45,7 +42,7 @@ def get_span(ids, tags, subid2id, ignored_ids, tokenizer):
 
 ## Load model
 device = "cpu"
-model_path = "./company_stock_model"
+model_path = "./model/mSystemEntity"
 tokenizer = AutoTokenizer.from_pretrained(model_path, add_prefix_space=True)
 config = AutoConfig.from_pretrained(model_path)
 

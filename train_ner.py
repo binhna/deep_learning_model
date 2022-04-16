@@ -1,6 +1,6 @@
 import os
 import numpy as np
-from seqeval.metrics import f1_score
+from seqeval.metrics import f1_score, classification_report
 from argparse import ArgumentParser
 from transformers import AutoConfig, AutoTokenizer, TrainingArguments
 
@@ -73,6 +73,7 @@ def compute_metrics(pred):
     em = sum(em) / len(em)
 
     f1 = f1_score(labels, preds, average="macro")
+    classification_report(labels, preds)
     return {"f1": f1, "em": em}
 
 
@@ -86,11 +87,20 @@ if __name__ == "__main__":
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)
 
+    config.id2label = None
+    config.label2id = None
+    
     train_data = NERDataset(args.train_path, tokenizer=tokenizer, config=config)
     # train_dataloader = DataLoader(train_data, batch_size=args.batch_size, shuffle=True)
-    valid_data = NERDataset(args.valid_path, tokenizer=tokenizer, config=config)
+    config.num_labels = train_data.get_num_labels()
+    config.id2label = train_data.id2label
+    config.label2id = train_data.label2id
+
+    valid_data = NERDataset(args.valid_path, tokenizer=tokenizer, config=config, split="valid")
 
     # valid_dataloader = DataLoader(valid_data, batch_size=args.batch_size, shuffle=False)
+    assert valid_data.id2label == train_data.id2label
+    print(train_data.id2label)
 
     # Cứ theo config này thì model sẽ auto lưu lại best model theo điểm f1 (nhớ phải define hàm compute_metrics để output ra f1)
     training_args = TrainingArguments(
@@ -102,8 +112,9 @@ if __name__ == "__main__":
         per_device_train_batch_size=args.batch_size,
         per_device_eval_batch_size=args.batch_size,
         evaluation_strategy="epoch",
+        # eval_steps=100,
         save_strategy="epoch",
-        metric_for_best_model="em",
+        metric_for_best_model="f1",
         push_to_hub=False,
         overwrite_output_dir=True,
         save_total_limit=1,

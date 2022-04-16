@@ -9,10 +9,11 @@ from transformers.trainer import unwrap_model
 
 class CustomTrainer(Trainer):
     def compute_loss(self, model, inputs, return_outputs=False):
-        labels = inputs.get("labels")
+        labels = inputs.get("labels").to("cpu")
         # forward pass
         outputs = model(**inputs)
-        logits = outputs.get("logits")
+        logits = outputs.get("logits").to("cpu")
+        # print(labels.is_cuda, logits.is_cuda)
         # compute custom loss (suppose one has 3 labels with different weights)
         loss_fct = nn.CrossEntropyLoss(ignore_index=-100)
         loss = loss_fct(logits.view(-1, self.model.config.num_labels), labels.view(-1))

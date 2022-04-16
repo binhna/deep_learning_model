@@ -3,8 +3,7 @@ import time
 from collections import defaultdict
 import torch
 
-from src.infer import tokenizer, model, model_path, get_span, max_length, config
-from postprocess_downstream.postprocess_company_stock import raw2ticker
+from src.infer import tokenizer, model, get_span, max_length, config
 
 
 if __name__ == "__main__":
@@ -48,9 +47,7 @@ if __name__ == "__main__":
             tokens = tokenizer.convert_ids_to_tokens(
                 inputs["input_ids"][0][1:index_end]
             )
-            # print(tokens)
-            # print(subid2id)
-            # get_span(inputs.ids)
+
 
             result = get_span(
                 inputs.input_ids[0][1:index_end].numpy(),
@@ -59,8 +56,4 @@ if __name__ == "__main__":
                 ignore_ids,
                 tokenizer,
             )
-            for entity_type, values in result.items():
-                for value in values:
-                    tickers = raw2ticker(value)
-                    print([entity_type, values, tickers])
             print(round(time.time() - start, 5) * 1000, "miliseconds")

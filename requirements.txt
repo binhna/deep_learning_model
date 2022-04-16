@@ -1,0 +1,6 @@
+beautifulsoup4==4.10.0
+numpy==1.19.4
+seqeval==1.2.2
+torch==1.8.0+cu111
+tqdm==4.36.1
+transformers==4.12.5
