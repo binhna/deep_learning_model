@@ -1,6 +1,7 @@
-beautifulsoup4==4.10.0
-numpy==1.19.4
+adapter_transformers==3.0.0
+beautifulsoup4==4.11.1
+numpy==1.19.5
 seqeval==1.2.2
-torch==1.8.0+cu111
-tqdm==4.36.1
-transformers==4.12.5
+torch==1.7.1
+tqdm==4.63.1
+transformers==4.18.0
