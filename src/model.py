@@ -10,7 +10,6 @@ class RobertaNER(RobertaPreTrainedModel):
         self.config = config
         self.roberta = AutoModel.from_config(config, add_pooling_layer=False)
         self.use_adapter = config.use_adapter
-        # print("\n\n\n", self.roberta.config.adapters)
         if config.use_crf:
             self.crf_layer = Transformer_CRF(
                 num_labels=self.config.num_labels, start_label_id=config.bos_token_id

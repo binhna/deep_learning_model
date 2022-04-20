@@ -1,6 +1,6 @@
 import os
 import numpy as np
-from seqeval.metrics import f1_score
+from seqeval.metrics import f1_score, classification_report
 from argparse import ArgumentParser
 from transformers import AutoConfig, AutoTokenizer, TrainingArguments
 
@@ -73,6 +73,7 @@ def compute_metrics(pred):
     em = sum(em) / len(em)
 
     f1 = f1_score(labels, preds, average="macro")
+    print(classification_report(labels, preds))
     return {"f1": f1, "em": em}
 
 
@@ -86,9 +87,16 @@ if __name__ == "__main__":
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)
 
+    config.label2id, config.id2label = None, None
     train_data = NERDataset(args.train_path, tokenizer=tokenizer, config=config)
+    config.num_labels = train_data.get_num_labels()
+    config.id2label = train_data.id2label
+    config.label2id = train_data.label2id
+    print(config.label2id)
     # train_dataloader = DataLoader(train_data, batch_size=args.batch_size, shuffle=True)
     valid_data = NERDataset(args.valid_path, tokenizer=tokenizer, config=config)
+
+    assert valid_data.label2id == train_data.label2id
 
     # valid_dataloader = DataLoader(valid_data, batch_size=args.batch_size, shuffle=False)
 
@@ -103,16 +111,12 @@ if __name__ == "__main__":
         per_device_eval_batch_size=args.batch_size,
         evaluation_strategy="epoch",
         save_strategy="epoch",
-        metric_for_best_model="em",
+        metric_for_best_model="f1",
         push_to_hub=False,
         overwrite_output_dir=True,
         save_total_limit=1,
         load_best_model_at_end=True,
     )
-
-    config.num_labels = train_data.get_num_labels()
-    config.id2label = train_data.id2label
-    config.label2id = train_data.label2id
 
     id2label = train_data.id2label
 

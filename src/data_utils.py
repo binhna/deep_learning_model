@@ -9,9 +9,6 @@ class NERDataset(torch.utils.data.Dataset):
     def __init__(self, dir_data, tokenizer, config) -> None:
         assert os.path.exists(dir_data), f"{dir_data} does not exist"
         self.tokenizer = tokenizer
-        self.format_data = config.format
-        self.augment_lower = config.augment_lower
-        self.lower = config.lower
         self.config = config
         self.max_seq_length = (
             config.max_position_embeddings - tokenizer.pad_token_id - 1
@@ -20,6 +17,8 @@ class NERDataset(torch.utils.data.Dataset):
         self.hashed_samples = []
         # stores all samples
         self.samples = []
+
+        self.id2label = set() if not config.id2label else config.id2label
 
         self._load_text(dir_data)
 
@@ -36,12 +35,10 @@ class NERDataset(torch.utils.data.Dataset):
             self.hashed_samples.append(hashtext)
             self.samples.append(new_sample)
 
-    # def dedupe(self):
-
     def _load_text(self, dir_data):
-        self.id2label = set()
 
-        if self.format_data == "conll":
+        id2label = set()
+        if self.config.format == "conll":
             with open(dir_data) as f:
                 sample = {"words": [], "tags": []}
                 for line in f:
@@ -55,12 +52,12 @@ class NERDataset(torch.utils.data.Dataset):
                         parts = line.split()
                         sample["words"].append(parts[0])
                         sample["tags"].append(parts[-1])
-                        self.id2label.add(parts[-1])
+                        id2label.add(parts[-1])
                 if sample["words"] and sample["tags"]:
                     # self.add_sample(sample)
                     self.samples.append(sample)
 
-        elif self.format_data == "flatten" and dir_data.endswith(".src"):
+        elif self.config.format == "flatten" and dir_data.endswith(".src"):
             with open(dir_data) as f_src, open(
                 dir_data.replace(".src", ".tgt")
             ) as f_tgt:
@@ -71,27 +68,25 @@ class NERDataset(torch.utils.data.Dataset):
                     total=len(sentences),
                     bar_format="{l_bar}{bar:30}{r_bar}{bar:-10b}",
                 ):
-                    if self.lower:
+                    if self.config.lower:
                         sent = sent.lower()
                     tokens = sent.strip().split()
                     tags = label.strip().split()
                     assert len(tokens) == len(tags), [tokens, tags]
                     self.samples.append({"words": tokens, "tags": tags})
                     # self.add_sample({"words": tokens, "tags": tags})
-                    self.id2label.update(tags)
+                    id2label.update(tags)
 
-                    if self.augment_lower and not self.lower:
+                    if self.config.augment_lower and not self.config.lower:
                         # lower
                         self.samples.append(
                             {"words": [token.lower() for token in tokens], "tags": tags}
                         )
-                        # self.add_sample(
-                        #     {"words": [token.lower() for token in tokens], "tags": tags}
-                        # )
 
-        self.id2label = sorted(list(self.id2label))
-        self.id2label = {i: tag for i, tag in enumerate(self.id2label)}
-        self.id2label[-100] = "X"
+        if not self.id2label:
+            self.id2label = sorted(list(id2label))
+            self.id2label = {i: tag for i, tag in enumerate(self.id2label)}
+            self.id2label[-100] = "X"
         self.label2id = {label: idx for idx, label in self.id2label.items()}
 
     def __getitem__(self, index):
