@@ -87,8 +87,7 @@ if __name__ == "__main__":
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)
 
-    config.id2label = None
-    config.label2id = None
+    config.id2label, config.label2id = None, None
     
     train_data = NERDataset(args.train_path, tokenizer=tokenizer, config=config)
     # train_dataloader = DataLoader(train_data, batch_size=args.batch_size, shuffle=True)
@@ -120,10 +119,6 @@ if __name__ == "__main__":
         save_total_limit=1,
         load_best_model_at_end=True,
     )
-
-    config.num_labels = train_data.get_num_labels()
-    config.id2label = train_data.id2label
-    config.label2id = train_data.label2id
 
     id2label = train_data.id2label
 

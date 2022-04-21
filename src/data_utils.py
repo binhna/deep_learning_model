@@ -30,7 +30,7 @@ class NERDataset(torch.utils.data.Dataset):
         if config.id2label:
             self.id2label = config.id2label
             self.label2id = {label: idx for idx, label in self.id2label.items()}
-        random.shuffle(self.samples)
+        # random.shuffle(self.samples)
         print(len(self.failed_samples["mismatch"]), len(self.failed_samples["index_oor"]))
         print(split, len(self.samples))
 
@@ -45,14 +45,15 @@ class NERDataset(torch.utils.data.Dataset):
         join_char = sample_join_char[1]
         special_char = "▁"
         len_char_original_token = [len(token) for token in sample["words"]]
-        new_tokens = self.tokenizer.tokenize(join_char.join(sample["words"]))
-        if len(new_tokens) > self.max_seq_length * 2:
+        new_tokens = tokenizer.tokenize(join_char.join(sample["words"]))
+        if len(new_tokens) > max_seq_length * 2:
             return
         new_tags = []
         index_original_token = 0
         next_tag = False
         for token in new_tokens:
             _token = token.replace(special_char, "")
+            # print([_token, index_original_token, next_tag, len_char_original_token[index_original_token]])
             if index_original_token >= len(len_char_original_token):
                 self.failed_samples["index_oor"].append(sample)
                 return
@@ -61,8 +62,8 @@ class NERDataset(torch.utils.data.Dataset):
                     new_tags.append(next_tag)
                 else:
                     new_tags.append(sample["tags"][index_original_token])
-                    index_original_token += 1
-                    next_tag = False
+                next_tag = False
+                index_original_token += 1
             elif 0 < len(_token) < len_char_original_token[index_original_token]:
                 if next_tag:
                     new_tags.append(next_tag)
@@ -80,6 +81,26 @@ class NERDataset(torch.utils.data.Dataset):
                 elif len_char_original_token[index_original_token] < 0:
                     self.failed_samples["mismatch"].append(sample)
                     return
+            elif len(_token) > len_char_original_token[index_original_token]:
+                # char_len_new_token = len(_token)
+                len_merge_token = 0
+                merge_tags = set()
+                for j in range(index_original_token, len(sample["words"])):
+                    # print(sample["words"][j], j)
+                    len_merge_token += len_char_original_token[j]
+                    merge_tags.add(sample["tags"][j])
+                    if len_merge_token == len(_token):
+                        # print(["merge", merge_tags, _token])
+                        if len(merge_tags) == 1:
+                            new_tags.append(list(merge_tags)[0])
+                            index_original_token = j + 1
+                            break
+                        else:
+                            return
+                    elif len_merge_token > len(_token):
+                        # print(len_merge_token, _token)
+                        return
+
             else:
                 new_tags.append("X")
         assert len(new_tokens) == len(new_tags), [
@@ -87,14 +108,14 @@ class NERDataset(torch.utils.data.Dataset):
             new_tags,
             join_char.join(sample["words"]),
         ]
-        self.samples.append({"text": join_char.join(sample["words"]), "tags": new_tags})
+        self.samples.append({"text": join_char.join(sample["words"]), "tags": new_tags, 
+                            "ori_words": sample["words"], "ori_tags": sample["tags"]})
 
 
     def load_conll(self, file):
         join_char = " "
         if re.search(r"ja|cn|ko|th", file):
             join_char = ""
-        tmp_samples = []
         id2label = set()
         with open(file) as f:
             sample = {"words": [], "tags": []}
@@ -118,7 +139,7 @@ class NERDataset(torch.utils.data.Dataset):
                 # self.samples.append(sample)
                 # tmp_samples.append((sample, join_char))
         if self.split == "valid":
-            random.shuffle(self.samples)
+            # random.shuffle(self.samples)
             self.samples = self.samples[:5000]
         return [self.samples, self.failed_samples, id2label]
 
@@ -179,6 +200,11 @@ class NERDataset(torch.utils.data.Dataset):
     def __getitem__(self, index):
         text = self.samples[index]["text"]
         labels = [self.label2id[l] for l in self.samples[index]["tags"]]
+        print(text)
+        print(self.tokenizer.tokenize(text))
+        print(self.samples[index]["tags"])
+        print(self.samples[index]["ori_words"])
+        print(self.samples[index]["ori_tags"])
         input_ids = self.tokenizer.encode(
             text,
             truncation=True,
@@ -208,5 +234,15 @@ class NERDataset(torch.utils.data.Dataset):
 
 
 if __name__ == "__main__":
-    dataset = NERDataset("data/test.txt")
+    from transformers import AutoTokenizer, AutoConfig
+    pretrained_path = "../../shared_data/xlmr_6L"
+    tokenizer = AutoTokenizer.from_pretrained(pretrained_path)
+    config = AutoConfig.from_pretrained(pretrained_path)
+    config.id2label, config.label2id = None, None
+    config.format = "conll"
+    config.augment_lower = False
+    config.lower = False
+    config.use_crf = False
+    dataset = NERDataset("data/mSystemEntity/valid/ja.txt", tokenizer, config, split="valid")
     print(len(dataset))
+    dataset[13]
