@@ -25,7 +25,6 @@ def get_span(ids, tags, subid2id, ignored_ids, tokenizer):
                 result[current_tag].append(tmp_ids)
             current_tag = None
             tmp_ids = []
-    # print(tmp_ids)
     if tmp_ids and current_tag:
         result[current_tag].append(tmp_ids)
 

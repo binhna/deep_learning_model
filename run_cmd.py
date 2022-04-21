@@ -26,7 +26,7 @@ if __name__ == "__main__":
             else:
                 subid2id[subid].append(subid)
             subid += 1
-
+        print(subid2id)
         # print("ignore_ids", ignore_ids)
 
         inputs = tokenizer(
@@ -41,7 +41,7 @@ if __name__ == "__main__":
             logits = output.get("logits")
             preds = torch.argmax(logits, dim=-1)[0].numpy()
             index_end = inputs["input_ids"][0].tolist().index(tokenizer.sep_token_id)
-            # print(preds[1:index_end])
+            print(preds[1:index_end])
             preds = [config.id2label[idx] for idx in preds]
             # print(preds[1:index_end])
             tokens = tokenizer.convert_ids_to_tokens(

@@ -73,7 +73,7 @@ def compute_metrics(pred):
     em = sum(em) / len(em)
 
     f1 = f1_score(labels, preds, average="macro")
-    classification_report(labels, preds)
+    print(classification_report(labels, preds))
     return {"f1": f1, "em": em}
 
 
@@ -87,20 +87,22 @@ if __name__ == "__main__":
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)
 
-    config.id2label = None
-    config.label2id = None
-    
-    train_data = NERDataset(args.train_path, tokenizer=tokenizer, config=config)
-    # train_dataloader = DataLoader(train_data, batch_size=args.batch_size, shuffle=True)
-    config.num_labels = train_data.get_num_labels()
-    config.id2label = train_data.id2label
-    config.label2id = train_data.label2id
-
-    valid_data = NERDataset(args.valid_path, tokenizer=tokenizer, config=config, split="valid")
+    if args.do_train:
+        config.id2label = None
+        config.label2id = None
+        
+        train_data = NERDataset(args.train_path, tokenizer=tokenizer, config=config)
+        # train_dataloader = DataLoader(train_data, batch_size=args.batch_size, shuffle=True)
+        config.num_labels = train_data.get_num_labels()
+        config.id2label = train_data.id2label
+        config.label2id = train_data.label2id
+    if args.do_eval:
+        valid_data = NERDataset(args.valid_path, tokenizer=tokenizer, config=config, split="valid")
 
     # valid_dataloader = DataLoader(valid_data, batch_size=args.batch_size, shuffle=False)
-    assert valid_data.id2label == train_data.id2label
-    print(train_data.id2label)
+    if args.do_train and args.do_eval:
+        assert valid_data.id2label == train_data.id2label
+    print(config.id2label)
 
     # Cứ theo config này thì model sẽ auto lưu lại best model theo điểm f1 (nhớ phải define hàm compute_metrics để output ra f1)
     training_args = TrainingArguments(
@@ -121,11 +123,7 @@ if __name__ == "__main__":
         load_best_model_at_end=True,
     )
 
-    config.num_labels = train_data.get_num_labels()
-    config.id2label = train_data.id2label
-    config.label2id = train_data.label2id
-
-    id2label = train_data.id2label
+    id2label = config.id2label
 
     model = RobertaNER(config=config)
     model = model.from_pretrained(args.model_path, config=config)
@@ -133,8 +131,8 @@ if __name__ == "__main__":
     trainer = CustomTrainer(
         model=model,
         args=training_args,
-        train_dataset=train_data,
-        eval_dataset=valid_data,
+        train_dataset=train_data if args.do_train else None,
+        eval_dataset=valid_data if args.do_eval else None,
         compute_metrics=compute_metrics,
     )
     if args.do_train:

@@ -1,5 +1,5 @@
-CUDA_VISIBLE_DEVICES=3 python train_ner.py \
-    --batch-size 64 \
+CUDA_VISIBLE_DEVICES=0 python train_ner.py \
+    --batch-size 96 \
     --model-path ../shared_data/xlmr_6L \
     --format conll \
     --train-path data/mSystemEntity/train \

@@ -119,7 +119,7 @@ class NERDataset(torch.utils.data.Dataset):
                 # tmp_samples.append((sample, join_char))
         if self.split == "valid":
             random.shuffle(self.samples)
-            self.samples = self.samples[:5000]
+            self.samples = self.samples[:5000] if self.config.do_train else self.samples
         return [self.samples, self.failed_samples, id2label]
 
 
