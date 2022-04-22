@@ -104,6 +104,7 @@ if __name__ == "__main__":
         assert valid_data.id2label == train_data.id2label
     print(config.id2label)
 
+    step_eval = int(0.2*len(train_data)//config.batch_size)
     # Cứ theo config này thì model sẽ auto lưu lại best model theo điểm f1 (nhớ phải define hàm compute_metrics để output ra f1)
     training_args = TrainingArguments(
         output_dir=args.output_dir,
@@ -113,9 +114,10 @@ if __name__ == "__main__":
         num_train_epochs=args.epoch,
         per_device_train_batch_size=args.batch_size,
         per_device_eval_batch_size=args.batch_size,
-        evaluation_strategy="epoch",
-        # eval_steps=100,
-        save_strategy="epoch",
+        evaluation_strategy="steps",
+        eval_steps=step_eval,
+        save_steps=step_eval,
+        save_strategy="steps",
         metric_for_best_model="f1",
         push_to_hub=False,
         overwrite_output_dir=True,

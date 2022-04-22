@@ -5,11 +5,13 @@ import glob
 import re
 import random
 from multiprocessing import Pool
+from collections import defaultdict
 
 
 class NERDataset(torch.utils.data.Dataset):
     def __init__(self, dir_data, tokenizer, config, split="train") -> None:
         assert os.path.exists(dir_data), f"{dir_data} does not exist"
+        self.dir_data = dir_data
         self.split = split
         self.tokenizer = tokenizer
         self.format_data = config.format
@@ -30,7 +32,7 @@ class NERDataset(torch.utils.data.Dataset):
         if config.id2label:
             self.id2label = config.id2label
             self.label2id = {label: idx for idx, label in self.id2label.items()}
-        random.shuffle(self.samples)
+        # random.shuffle(self.samples)
         print(len(self.failed_samples["mismatch"]), len(self.failed_samples["index_oor"]))
         print(split, len(self.samples))
 
@@ -53,6 +55,7 @@ class NERDataset(torch.utils.data.Dataset):
         next_tag = False
         for token in new_tokens:
             _token = token.replace(special_char, "")
+            # print([_token, index_original_token, next_tag, len_char_original_token[index_original_token]])
             if index_original_token >= len(len_char_original_token):
                 self.failed_samples["index_oor"].append(sample)
                 return
@@ -61,8 +64,8 @@ class NERDataset(torch.utils.data.Dataset):
                     new_tags.append(next_tag)
                 else:
                     new_tags.append(sample["tags"][index_original_token])
-                    index_original_token += 1
-                    next_tag = False
+                next_tag = False
+                index_original_token += 1
             elif 0 < len(_token) < len_char_original_token[index_original_token]:
                 if next_tag:
                     new_tags.append(next_tag)
@@ -80,21 +83,48 @@ class NERDataset(torch.utils.data.Dataset):
                 elif len_char_original_token[index_original_token] < 0:
                     self.failed_samples["mismatch"].append(sample)
                     return
+            elif len(_token) > len_char_original_token[index_original_token]:
+                # char_len_new_token = len(_token)
+                len_merge_token = 0
+                merge_tags = set()
+                for j in range(index_original_token, len(sample["words"])):
+                    # print(sample["words"][j], j)
+                    len_merge_token += len_char_original_token[j]
+                    merge_tags.add(sample["tags"][j])
+                    if len_merge_token == len(_token):
+                        # print(["merge", merge_tags, _token])
+                        if len(merge_tags) == 1:
+                            new_tags.append(list(merge_tags)[0])
+                            index_original_token = j + 1
+                            break
+                        else:
+                            return
+                    elif len_merge_token > len(_token):
+                        # print(len_merge_token, _token)
+                        return
+
             else:
                 new_tags.append("X")
-        assert len(new_tokens) == len(new_tags), [
-            new_tokens,
-            new_tags,
-            join_char.join(sample["words"]),
-        ]
-        self.samples.append({"text": join_char.join(sample["words"]), "tags": new_tags})
+        if len(new_tokens) != len(new_tags):
+            self.failed_samples["mismatch"].append(sample)
+            return
+            # print([
+            # new_tokens,
+            # new_tags,
+            # join_char.join(sample["words"]),
+            # sample["words"],
+            # sample["tags"],
+            # len(new_tokens),
+            # len(new_tags)])
+
+        self.samples.append({"text": join_char.join(sample["words"]), "tags": new_tags, 
+                            "ori_words": sample["words"], "ori_tags": sample["tags"]})
 
 
     def load_conll(self, file):
         join_char = " "
         if re.search(r"ja|cn|ko|th", file):
             join_char = ""
-        tmp_samples = []
         id2label = set()
         with open(file) as f:
             sample = {"words": [], "tags": []}
@@ -119,7 +149,7 @@ class NERDataset(torch.utils.data.Dataset):
                 # tmp_samples.append((sample, join_char))
         if self.split == "valid":
             random.shuffle(self.samples)
-            self.samples = self.samples[:5000] if self.config.do_train else self.samples
+            self.samples = self.samples[:5000] if self.config.do_train and os.path.isdir(self.dir_data) else self.samples
         return [self.samples, self.failed_samples, id2label]
 
 
@@ -136,6 +166,7 @@ class NERDataset(torch.utils.data.Dataset):
                                     total=len(files), desc="Loading data"))
                 
             for (samples, failed_samples, id2label_) in tmp_samples:
+                samples = balance_data(samples)
                 self.samples.extend(samples)
                 self.failed_samples.update(failed_samples)
                 id2label.update(id2label_)
@@ -179,6 +210,11 @@ class NERDataset(torch.utils.data.Dataset):
     def __getitem__(self, index):
         text = self.samples[index]["text"]
         labels = [self.label2id[l] for l in self.samples[index]["tags"]]
+        # print(text)
+        # print(self.tokenizer.tokenize(text))
+        # print(self.samples[index]["tags"])
+        # print(self.samples[index]["ori_words"])
+        # print(self.samples[index]["ori_tags"])
         input_ids = self.tokenizer.encode(
             text,
             truncation=True,
@@ -207,6 +243,65 @@ class NERDataset(torch.utils.data.Dataset):
         }
 
 
+def check_entity_type_sample(sample):
+    unique_tags = set([tag for tag in sample["tags"] if tag.startswith("B")])
+    if len(unique_tags) == 1:
+        return list(unique_tags)[0].split("-")[-1]
+    elif not unique_tags:
+        return "O"
+    return "GENERAL"
+
+def balance_data(sample_by_type: dict):
+    # sample_by_type = defaultdict(list)
+    # with open(data_file) as f:
+    #     sample = {"words": [], "tags": []}
+    #     for line in f:
+    #         parts = line.strip().split()
+    #         if not parts:
+    #             sample_type = check_entity_type_sample(sample)
+    #             sample_by_type[sample_type].append(sample)
+    #             sample = {"words": [], "tags": []}
+    #             continue
+    #         sample["words"].append(parts[0])
+    #         sample["tags"].append(parts[-1])
+    
+    min_num_sample = len(sample_by_type["O"])
+    print("\n## BEFORE ##\n")
+    for key, samples in sample_by_type.items():
+        print(key, len(samples))
+        if key in ["O", "GENERAL"]:
+            continue
+        if len(samples) < min_num_sample:
+            min_num_sample = len(samples)
+    print("\n## AFTER ##\n")
+    total_samples = []
+    for key, samples in sample_by_type.items():
+        if key in ["O", "GENERAL"]:
+            total_samples.extend(samples[:int(min_num_sample*2.4)])
+            print(key, len(samples[:int(min_num_sample*2.4)]))
+            continue
+        if len(samples) > min_num_sample*1.2:
+            total_samples.extend(samples[:int(min_num_sample*1.2)])
+            print(key, len(samples[:int(min_num_sample*1.2)]))
+        else:
+            total_samples.extend(samples)
+            print(key, len(samples))
+    
+    return total_samples
+
+
+
 if __name__ == "__main__":
-    dataset = NERDataset("data/test.txt")
+    from transformers import AutoTokenizer, AutoConfig
+    pretrained_path = "../shared_data/xlmr_6L"
+    tokenizer = AutoTokenizer.from_pretrained(pretrained_path)
+    config = AutoConfig.from_pretrained(pretrained_path)
+    config.id2label, config.label2id = None, None
+    config.format = "conll"
+    config.augment_lower = False
+    config.lower = False
+    config.use_crf = False
+    config.do_train = False
+    dataset = NERDataset("data/mSystemEntity/valid/en.txt", tokenizer, config, split="valid")
     print(len(dataset))
+    dataset[13]

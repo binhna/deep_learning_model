@@ -20,6 +20,7 @@ def get_span(ids, tags, subid2id, ignored_ids, tokenizer):
             tmp_ids = [i]
         elif tag.startswith("I"):
             tmp_ids.append(i)
+            current_tag = tag[2:] if not current_tag else current_tag
         else:
             if tmp_ids:
                 result[current_tag].append(tmp_ids)
@@ -41,8 +42,8 @@ def get_span(ids, tags, subid2id, ignored_ids, tokenizer):
 
 ## Load model
 device = "cpu"
-model_path = "./model/mSystemEntity"
-tokenizer = AutoTokenizer.from_pretrained(model_path, add_prefix_space=True)
+model_path = "./model/viSystemEntity"
+tokenizer = AutoTokenizer.from_pretrained("../shared_data/xlmr_6L", add_prefix_space=True)
 config = AutoConfig.from_pretrained(model_path)
 
 # adapter
