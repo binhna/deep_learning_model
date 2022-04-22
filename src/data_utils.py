@@ -161,12 +161,16 @@ class NERDataset(torch.utils.data.Dataset):
                 files = glob.glob(os.path.join(dir_data, "*.txt"))
             else:
                 files = [dir_data]
-            with Pool(processes=30) as p:
+            with Pool(processes=2) as p:
                 tmp_samples = list(tqdm(p.imap_unordered(self.load_conll, files),
                                     total=len(files), desc="Loading data"))
-                
+
             for (samples, failed_samples, id2label_) in tmp_samples:
-                samples = balance_data(samples)
+                sample_by_type = defaultdict(list)
+                for sample in tqdm(samples):
+                    sample_type = check_entity_type_sample(sample)
+                    sample_by_type[sample_type].append(sample)
+                samples = balance_data(sample_by_type)
                 self.samples.extend(samples)
                 self.failed_samples.update(failed_samples)
                 id2label.update(id2label_)
@@ -244,7 +248,7 @@ class NERDataset(torch.utils.data.Dataset):
 
 
 def check_entity_type_sample(sample):
-    unique_tags = set([tag for tag in sample["tags"] if tag.startswith("B")])
+    unique_tags = set([tag for tag in sample["ori_tags"] if tag.startswith("B")])
     if len(unique_tags) == 1:
         return list(unique_tags)[0].split("-")[-1]
     elif not unique_tags:

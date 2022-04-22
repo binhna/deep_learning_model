@@ -2,10 +2,10 @@ CUDA_VISIBLE_DEVICES=0 python train_ner.py \
     --batch-size 96 \
     --model-path ../shared_data/xlmr_6L \
     --format conll \
-    --train-path data/mSystemEntity/train/ja.txt \
-    --valid-path data/mSystemEntity/valid/ja.txt \
+    --train-path data/mSystemEntity/train/vi.txt \
+    --valid-path data/mSystemEntity/valid/vi.txt \
     --freeze_layer_count 0 \
     --epoch 5 \
     --do-eval \
     --do-train \
-    --output-dir model/jaSystemEntity
+    --output-dir model/viSystemEntity
