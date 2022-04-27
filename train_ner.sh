@@ -1,10 +1,11 @@
 CUDA_VISIBLE_DEVICES=0 python train_ner.py \
-    --model-path ../../shared_data/roberta-2L-vi \
-    --format flatten \
-    --train-path data/company_stock/train.src \
-    --valid-path data/company_stock/valid.src \
+    --model-path ../../shared_data/bdi_roberta_4L_oscarwiki_envi/ \
+    --format conll \
+    --train-path data/mSystemEntity/train/vi.txt \
+    --valid-path data/mSystemEntity/valid/vi.txt \
     --freeze_layer_count 0 \
     --epoch 10 \
     --do-eval \
     --do-train \
-    --output-dir company_stock_model
+    --output-dir model/viSystemEntity \
+    --use-crf

@@ -45,7 +45,7 @@ def get_span(ids, tags, subid2id, ignored_ids, tokenizer):
 
 ## Load model
 device = "cpu"
-model_path = "./company_stock_model"
+model_path = "./enSystemEntity"
 tokenizer = AutoTokenizer.from_pretrained(model_path, add_prefix_space=True)
 config = AutoConfig.from_pretrained(model_path)
 

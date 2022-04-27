@@ -1,6 +1,6 @@
 import os
 import numpy as np
-from seqeval.metrics import f1_score
+from seqeval.metrics import f1_score, classification_report
 from argparse import ArgumentParser
 from transformers import AutoConfig, AutoTokenizer, TrainingArguments
 
@@ -56,7 +56,8 @@ parser.add_argument("--lower", action="store_true", help="lowercase the training
 def compute_metrics(pred):
     labels = pred.label_ids
     preds = pred.predictions
-    preds = preds.argmax(-1)
+    if not config.use_crf:
+        preds = preds.argmax(-1)
 
     mapping = lambda i: id2label[i]
     v_func = np.vectorize(mapping)
@@ -72,6 +73,7 @@ def compute_metrics(pred):
     em = [np.array_equal(pred_, label_) for pred_, label_ in zip(preds, labels)]
     em = sum(em) / len(em)
 
+    print(classification_report(labels, preds))
     f1 = f1_score(labels, preds, average="macro")
     return {"f1": f1, "em": em}
 
@@ -86,12 +88,16 @@ if __name__ == "__main__":
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)
 
+    config.id2label, config.label2id = None, None
     train_data = NERDataset(args.train_path, tokenizer=tokenizer, config=config)
+    config.id2label, config.label2id = train_data.id2label, train_data.label2id
+    config.num_labels = train_data.get_num_labels()
     # train_dataloader = DataLoader(train_data, batch_size=args.batch_size, shuffle=True)
     valid_data = NERDataset(args.valid_path, tokenizer=tokenizer, config=config)
-
+    assert train_data.id2label == valid_data.id2label and train_data.label2id == valid_data.label2id
     # valid_dataloader = DataLoader(valid_data, batch_size=args.batch_size, shuffle=False)
 
+    step_eval = int(0.25*len(train_data)//config.batch_size)
     # Cứ theo config này thì model sẽ auto lưu lại best model theo điểm f1 (nhớ phải define hàm compute_metrics để output ra f1)
     training_args = TrainingArguments(
         output_dir=args.output_dir,
@@ -101,20 +107,18 @@ if __name__ == "__main__":
         num_train_epochs=args.epoch,
         per_device_train_batch_size=args.batch_size,
         per_device_eval_batch_size=args.batch_size,
-        evaluation_strategy="epoch",
-        save_strategy="epoch",
-        metric_for_best_model="em",
+        evaluation_strategy="steps",
+        eval_steps=step_eval,
+        save_steps=step_eval,
+        save_strategy="steps",
+        metric_for_best_model="f1",
         push_to_hub=False,
         overwrite_output_dir=True,
         save_total_limit=1,
         load_best_model_at_end=True,
     )
 
-    config.num_labels = train_data.get_num_labels()
-    config.id2label = train_data.id2label
-    config.label2id = train_data.label2id
-
-    id2label = train_data.id2label
+    id2label = config.id2label
 
     model = RobertaNER(config=config)
     model = model.from_pretrained(args.model_path, config=config)

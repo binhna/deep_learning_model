@@ -4,7 +4,6 @@ from collections import defaultdict
 import torch
 
 from src.infer import tokenizer, model, model_path, get_span, max_length, config
-from postprocess_downstream.postprocess_company_stock import raw2ticker
 
 
 if __name__ == "__main__":
@@ -39,8 +38,11 @@ if __name__ == "__main__":
         )
         with torch.no_grad():
             output = model(**inputs)
-            logits = output.get("logits")
-            preds = torch.argmax(logits, dim=-1)[0].numpy()
+            if not model.config.use_crf:
+                logits = output.get("logits")
+                preds = torch.argmax(logits, dim=-1)[0].numpy()
+            else:
+                preds = output.get("tags")[0].numpy()
             index_end = inputs["input_ids"][0].tolist().index(tokenizer.sep_token_id)
             # print(preds[1:index_end])
             preds = [config.id2label[idx] for idx in preds]
@@ -59,8 +61,4 @@ if __name__ == "__main__":
                 ignore_ids,
                 tokenizer,
             )
-            for entity_type, values in result.items():
-                for value in values:
-                    tickers = raw2ticker(value)
-                    print([entity_type, values, tickers])
             print(round(time.time() - start, 5) * 1000, "miliseconds")

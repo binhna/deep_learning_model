@@ -11,11 +11,15 @@ class CustomTrainer(Trainer):
     def compute_loss(self, model, inputs, return_outputs=False):
         labels = inputs.get("labels")
         # forward pass
+        # print(inputs)
         outputs = model(**inputs)
-        logits = outputs.get("logits")
-        # compute custom loss (suppose one has 3 labels with different weights)
-        loss_fct = nn.CrossEntropyLoss(ignore_index=-100)
-        loss = loss_fct(logits.view(-1, self.model.config.num_labels), labels.view(-1))
+        if not model.config.use_crf:
+            logits = outputs.get("logits")
+            # compute custom loss (suppose one has 3 labels with different weights)
+            loss_fct = nn.CrossEntropyLoss(ignore_index=-100)
+            loss = loss_fct(logits.view(-1, self.model.config.num_labels), labels.view(-1))
+        else:
+            loss = outputs.get("loss")
         return (loss, outputs) if return_outputs else loss
     
     

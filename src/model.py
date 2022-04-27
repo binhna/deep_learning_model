@@ -1,7 +1,8 @@
 from transformers import RobertaPreTrainedModel, AutoModel, AdapterConfig
 import torch
+from torchcrf import CRF
 
-from .crf_layer import CRF, Transformer_CRF
+# from .crf_layer import CRF, Transformer_CRF
 
 
 class RobertaNER(RobertaPreTrainedModel):
@@ -12,9 +13,7 @@ class RobertaNER(RobertaPreTrainedModel):
         self.use_adapter = config.use_adapter
         # print("\n\n\n", self.roberta.config.adapters)
         if config.use_crf:
-            self.crf_layer = Transformer_CRF(
-                num_labels=self.config.num_labels, start_label_id=config.bos_token_id
-            )
+            self.crf_layer = CRF(num_tags=self.config.num_labels, batch_first=True)
 
         if config.use_adapter:
             print("\n\nadd adapters")
@@ -75,8 +74,18 @@ class RobertaNER(RobertaPreTrainedModel):
         sequence_output = self.dropout(sequence_output)
         logits = self.classifier(sequence_output)
         if self.config.use_crf:
-            logits, active_logits, loss = self.crf_layer(logits, labels)
-        # print(logits)
+            attention_mask = attention_mask.type(torch.ByteTensor).to(attention_mask.device)
+            
+            # infer
+            batch_size, seq_length = input_ids.size()
+            labels = labels if labels is not None else torch.ones((batch_size, seq_length), dtype=torch.long).to(input_ids.device)
+            
+            loss = -self.crf_layer(emissions=logits, tags=labels)#, mask=attention_mask)
+            tags = self.crf_layer.decode(emissions=logits)#, mask=attention_mask)
+            tags = torch.LongTensor(tags)
+            # print(tags)
+            return {"tags": tags, "loss": loss}
+        # print(logits.size(), logits)
         # exit()
         # return {"logits": logits, "id2label": self.config.id2label}
         return {"logits": logits}
