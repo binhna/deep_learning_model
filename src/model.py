@@ -1,8 +1,7 @@
 from transformers import RobertaPreTrainedModel, AutoModel, AdapterConfig
 import torch
-from torchcrf import CRF
 
-# from .crf_layer import CRF, Transformer_CRF
+from .crf_layer import CRF
 
 
 class RobertaNER(RobertaPreTrainedModel):
