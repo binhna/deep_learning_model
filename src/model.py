@@ -1,90 +1,210 @@
-from transformers import RobertaPreTrainedModel, AutoModel, AdapterConfig
 import torch
+from torch import nn
 
-from .crf_layer import CRF
+from src.crf_layer import CRF
+from typing import List
 
 
-class RobertaNER(RobertaPreTrainedModel):
-    def __init__(self, config):
-        super().__init__(config)
+class NERModel(torch.nn.Module):
+    def __init__(self, config, tokenizer):
+        super(NERModel, self).__init__()
         self.config = config
-        self.roberta = AutoModel.from_config(config, add_pooling_layer=False)
-        self.use_adapter = config.use_adapter
-        # print("\n\n\n", self.roberta.config.adapters)
-        if config.use_crf:
-            self.crf_layer = CRF(num_tags=self.config.num_labels, batch_first=True)
-
-        if config.use_adapter:
-            print("\n\nadd adapters")
-            if config.task_name not in self.roberta.config.adapters:
-                task_config = AdapterConfig.load("pfeiffer", reduction_factor=6)
-                self.roberta.add_adapter(config.task_name, config=task_config)
-            self.roberta.train_adapter([config.task_name])
-            self.roberta.set_active_adapters([config.task_name])
-
-        self.dropout = torch.nn.Dropout(
-            config.classifier_dropout
-            if config.classifier_dropout
-            else config.hidden_dropout_prob
+        self.tokenizer = tokenizer
+        self.embedding = nn.Embedding(
+            num_embeddings=len(tokenizer.token2id),
+            embedding_dim=config.embedding_dim,
+            padding_idx=tokenizer.pad_token_id,
         )
-        self.classifier = torch.nn.Linear(config.hidden_size, self.config.num_labels)
-        self.freeze_layers()
-        # print(hasattr(self, "classifier"))
 
-    def freeze_layers(self):
-        # for name, param in self.roberta.named_parameters():
-        #     print(name, param.requires_grad)
-        if self.config.freeze_layer_count and not self.config.use_adapter:
-            # We freeze here the embeddings of the model
-            for param in self.roberta.embeddings.parameters():
-                param.requires_grad = False
+        self.cnn_head = torch.jit.script(CNNSubwordLevelBN(config))
 
-            if self.config.freeze_layer_count != -1:
-                # if freeze_layer_count == -1, we only freeze the embedding layer
-                # otherwise we freeze the first `freeze_layer_count` encoder layers
-                for layer in self.roberta.encoder.layer[
-                    : self.config.freeze_layer_count
-                ]:
-                    for param in layer.parameters():
-                        param.requires_grad = False
-
-    def forward(
-        self,
-        input_ids=None,
-        attention_mask=None,
-        token_type_ids=None,
-        position_ids=None,
-        head_mask=None,
-        inputs_embeds=None,
-        labels=None,
-        output_attentions=None,
-        output_hidden_states=None,
-        return_dict=None,
-    ):
-        outputs = self.roberta(
-            input_ids,
-            attention_mask=attention_mask,
-            token_type_ids=token_type_ids,
-            position_ids=position_ids,
-            head_mask=head_mask,
+        self.linear_hidden = torch.jit.script(
+            nn.Linear(
+                in_features=config.embedding_dim, out_features=config.tf_embedding_dim
+            )
         )
-        sequence_output = outputs[0]
-        # print(sequence_output.size())
-        sequence_output = self.dropout(sequence_output)
-        logits = self.classifier(sequence_output)
-        if self.config.use_crf:
-            attention_mask = attention_mask.type(torch.ByteTensor).to(attention_mask.device)
-            
-            # infer
-            batch_size, seq_length = input_ids.size()
-            labels = labels if labels is not None else torch.ones((batch_size, seq_length), dtype=torch.long).to(input_ids.device)
-            
-            loss = -self.crf_layer(emissions=logits, tags=labels)#, mask=attention_mask)
-            tags = self.crf_layer.decode(emissions=logits)#, mask=attention_mask)
-            tags = torch.LongTensor(tags)
-            # print(tags)
-            return {"tags": tags, "loss": loss}
-        # print(logits.size(), logits)
-        # exit()
-        # return {"logits": logits, "id2label": self.config.id2label}
-        return {"logits": logits}
+
+        self.transformer_head = nn.ModuleList(
+            [
+                nn.TransformerEncoderLayer(
+                    d_model=config.tf_embedding_dim,
+                    nhead=config.num_attention_heads,
+                    dim_feedforward=config.ffn_embedding_dim,
+                    dropout=config.tf_dropout,
+                    # attention_dropout=config.tf_dropout,
+                    # activation_dropout=config.tf_dropout,
+                    activation=config.activation_fn,
+                    batch_first=True,
+                )
+                for _ in range(config.num_tf_encoder_layers)
+            ]
+        )
+
+        self.features_transforms = nn.Linear(
+            config.tf_embedding_dim, self.config.num_labels
+        )
+        self.dropout = nn.Dropout(config.dropout)
+        # self.crf_layer = torch.jit.script(
+        #     CRF(self.config.num_labels, batch_first=True)
+        # )
+        # self.pad_word_len = self.config.pad_word_len
+        # dictionary = tokenizer.get_ord_map(self.config.dictionary)
+        # self.ord2char = dictionary["ord2char"]
+        # self.hash2idx = dictionary["hash2idx_ascii"]
+        # self.idx2label = dictionary["idx2label"]
+        # self.n_gram = config.n_gram
+        # self.UNK = tokenizer.UNK
+        # self.PAD_SEM_HASH_TOKEN = tokenizer.PAD_SEM_HASH_TOKEN
+        # self.padding_idx = config.dictionary["hash2idx"][tokenizer.PAD_TOKEN]
+
+    def forward(self, input_ids, lengths=None, labels=None):
+        # batch x num_subwords
+        # batch_size = src_tokens.size(0)
+        # num_words = src_tokens.size(1) // self.pad_word_len
+        # src_tokens = src_tokens.view(batch_size, num_words, self.pad_word_len)
+        # src_tokens = nn.utils.rnn.pack_padded_sequence(input_ids, lengths=lengths, batch_first=True)
+
+        # batch x num_subwords x embedding dim
+        src_tokens_embedding = self.embedding(input_ids)
+        
+        # batch x num_subwords x embedding dim
+        words_embedding = self.cnn_head(src_tokens_embedding)
+        words_embedding = self.dropout(words_embedding)
+        # words_embedding = src_tokens_embedding
+
+        # n_gram_words_embedding = self.word_transforms(words_embedding)
+        # n_gram_words_embedding = self.dropout(n_gram_words_embedding)
+        # sentence_embedding = torch.cat(
+        #     [words_embedding, n_gram_words_embedding], dim=-1
+        # )
+        # batch x num_subwords x tf hidden size
+        sentence_embedding = torch.tanh(self.linear_hidden(words_embedding))
+
+        # account for padding while computing the representation
+        padding_mask = input_ids.eq(self.tokenizer.pad_token_id).to(input_ids.device)
+        x = sentence_embedding
+        if padding_mask is not None:
+            x = x * (1 - padding_mask.unsqueeze(-1).type_as(x))
+
+        # B x T x C -> T x B x C
+        # x = x.transpose(0, 1)
+        for layer in self.transformer_head:
+            x = layer(x, src_key_padding_mask=padding_mask)
+
+        # sentence_embedding = x.transpose(0, 1)
+
+        # batch x num subwords x num tags
+        logits = self.features_transforms(x)
+
+        if self.config.task == "text_classification":
+            logits = logits[:, 0, :] # first word
+
+        # print("labels", labels.size())
+        # print("logits", logits.size())
+        loss_fct = nn.CrossEntropyLoss(ignore_index=-100)
+        loss = loss_fct(
+            logits.view(-1, self.config.num_labels), labels.view(-1)
+        )
+
+        return {"logits": logits, "loss": loss}
+
+    @torch.jit.export
+    def decode(self, src_tokens):
+        src_tokens_embedding = self.embedding(src_tokens)
+        words_embedding = self.cnn_head(src_tokens_embedding)
+        words_embedding = self.dropout(words_embedding)
+
+        sentence_embedding = torch.tanh(self.linear_hidden(words_embedding))
+        logits = self.features_transforms(sentence_embedding)
+
+        return logits
+        # return [
+        #     [self.tokenizer.id2label[idx] for idx in item]
+        #     for item in self.crf_layer.decode(logits)
+        # ]
+
+    @torch.jit.export
+    def encode_input(self, char_ord_input):
+        # print(list(self.ord2char.keys()))
+        # print([item.item() for item in char_ord_input[0]])
+        input_str: str = "".join(
+            [self.ord2char.get(item.item(), "\\u----") for item in char_ord_input[0]]
+        )
+        # print([ord(item) for item in input_str])
+        words: List[str] = input_str.split()
+        ids: List[int] = []
+        for word in words:
+            # if '\\u----' in word:
+            #     print(word)
+            word: str = "#{}#".format(word).replace("\\u", " \\u")
+            input_list: List[str] = []
+            for item in word.split():
+                if item.startswith("\\u"):
+                    input_list.extend([item[:6]] + list(item[6:]))
+                else:
+                    input_list.extend(list(item))
+            # print([ord(i) for i in input_list])
+            if len(input_list) < self.n_gram:
+                ngrams = [input_list]
+            else:
+                # ngrams = zip(*[input_list[i:] for i in range(self.n_gram)])
+                ngrams = [
+                    input_list[i : i + self.n_gram]
+                    for i in range(len(input_list) - self.n_gram + 1)
+                ]
+            word_ids = [
+                self.hash2idx.get("".join(gram), self.hash2idx[self.UNK])
+                for gram in list(ngrams)
+            ]
+            if len(word_ids) < self.pad_word_len:
+                word_ids.extend(
+                    [self.hash2idx[self.PAD_SEM_HASH_TOKEN]]
+                    * (self.pad_word_len - len(word_ids))
+                )
+            elif len(word_ids) > self.pad_word_len:
+                word_ids = word_ids[: self.pad_word_len]
+            ids.extend(word_ids)
+        return ids
+
+
+class CNNSubwordLevelBN(torch.nn.Module):
+    def __init__(self, config):
+        super(CNNSubwordLevelBN, self).__init__()
+
+        self._embedding_dim = config.embedding_dim
+        self._num_filters = config.embedding_dim // len(config.semhash_window_sizes)
+        self.semhash_window_sizes = config.semhash_window_sizes
+        self._convolution_layers = torch.nn.ModuleList(
+            [
+                nn.Conv1d(
+                    in_channels=self._embedding_dim,
+                    out_channels=self._num_filters,
+                    kernel_size=window_size,
+                    padding="same",
+                )
+                for window_size in self.semhash_window_sizes
+            ]
+        )
+        for i, conv_layer in enumerate(self._convolution_layers):
+            self.add_module("conv_layer_%d" % i, conv_layer)
+        self.activation = nn.ReLU()
+
+    def forward(self, features):
+        batch_size, num_tokens, embedding_dim = features.size()
+
+        # tokens = features.view(batch_size, num_tokens, embedding_dim)
+
+        # batch x embed size x num subwords
+        tokens = torch.transpose(features, 1, 2)
+
+        filter_outputs = []
+        for convolution_layer in self._convolution_layers:
+            filter_outputs.append(self.activation(convolution_layer(tokens)))
+
+        output = (
+            torch.cat(filter_outputs, dim=1)
+            if len(filter_outputs) > 1
+            else filter_outputs[0]
+        )
+
+        return output.view(batch_size, num_tokens, embedding_dim)

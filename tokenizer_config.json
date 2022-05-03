@@ -1,0 +1,11 @@
+{
+    "n_gram": 3,
+    "unk_token": "#@UNK@#",
+    "start_token": "",
+    "end_token": "",
+    "pad_semhash_token": "#PAD_SH_T#",
+    "pad_token": "#PAD_T#",
+    "pad_semhash_label": "#PAD_SH_L#",
+    "pad_label": "#PAD_L#",
+    "pad_word_len": 0
+}

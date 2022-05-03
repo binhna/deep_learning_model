@@ -1,0 +1,11 @@
+{
+    "embedding_dim": 90,
+    "tf_embedding_dim": 128,
+    "ffn_embedding_dim": 512,
+    "tf_dropout": 0.2,
+    "num_attention_heads": 2,
+    "activation_fn": "gelu",
+    "num_tf_encoder_layers": 2,
+    "dropout": 0.3,
+    "semhash_window_sizes": [1, 3, 5]
+}

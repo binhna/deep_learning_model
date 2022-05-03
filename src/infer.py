@@ -6,7 +6,7 @@ import re
 import os
 import glob
 
-from .model import RobertaNER
+from .model import NERModel
 
 
 def get_span(ids, tags, subid2id, ignored_ids, tokenizer):
@@ -51,13 +51,13 @@ config = AutoConfig.from_pretrained(model_path)
 
 # adapter
 if config.use_adapter:
-    model = RobertaNER.from_pretrained(config.model_path, config=config)
+    model = NERModel.from_pretrained(config.model_path, config=config)
     model.roberta.load_adapter(os.path.join(model_path, "ner"))
     model.classifier.load_state_dict(
         torch.load(os.path.join(model_path, "classifier.bin"))
     )
 else:
-    model = RobertaNER.from_pretrained(model_path, config=config)
+    model = NERModel.from_pretrained(model_path, config=config)
 model.to(device)
 model.eval()
 

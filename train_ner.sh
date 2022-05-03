@@ -1,11 +1,12 @@
 CUDA_VISIBLE_DEVICES=0 python train_ner.py \
-    --model-path ../../shared_data/bdi_roberta_4L_oscarwiki_envi/ \
-    --format conll \
-    --train-path data/mSystemEntity/train/vi.txt \
-    --valid-path data/mSystemEntity/valid/vi.txt \
-    --freeze_layer_count 0 \
-    --epoch 10 \
+    --format csv \
+    --batch-size 128 \
+    --train-path data/sentiment_for_financial_news/train.csv \
+    --valid-path data/sentiment_for_financial_news/valid.csv \
+    --epoch 30 \
     --do-eval \
     --do-train \
-    --output-dir model/viSystemEntity \
-    --use-crf
+    --use-crf \
+    --task text_classification \
+    --metric_for_best em \
+    --output-dir model/visemhash
