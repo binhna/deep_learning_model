@@ -4,7 +4,7 @@ from tqdm import tqdm
 import glob
 import re
 import random
-from multiprocessing import Pool
+import multiprocessing 
 from collections import defaultdict
 
 
@@ -14,9 +14,6 @@ class NERDataset(torch.utils.data.Dataset):
         self.dir_data = dir_data
         self.split = split
         self.tokenizer = tokenizer
-        self.format_data = config.format
-        self.augment_lower = config.augment_lower
-        self.lower = config.lower
         self.config = config
         self.max_seq_length = (
             config.max_position_embeddings - tokenizer.pad_token_id - 1
@@ -104,18 +101,10 @@ class NERDataset(torch.utils.data.Dataset):
                         return
 
             else:
-                new_tags.append("X")
+                new_tags.append("X" if not self.config.use_crf else "O")
         if len(new_tokens) != len(new_tags):
             self.failed_samples["mismatch"].append(sample)
             return
-            # print([
-            # new_tokens,
-            # new_tags,
-            # join_char.join(sample["words"]),
-            # sample["words"],
-            # sample["tags"],
-            # len(new_tokens),
-            # len(new_tags)])
 
         self.samples.append({"text": join_char.join(sample["words"]), "tags": new_tags, 
                             "ori_words": sample["words"], "ori_tags": sample["tags"]})
@@ -149,33 +138,36 @@ class NERDataset(torch.utils.data.Dataset):
                 # tmp_samples.append((sample, join_char))
         if self.split == "valid":
             random.shuffle(self.samples)
-            self.samples = self.samples[:5000] if self.config.do_train and os.path.isdir(self.dir_data) else self.samples
+            # self.samples = self.samples[:5000] if self.config.do_train and os.path.isdir(self.dir_data) else self.samples
         return [self.samples, self.failed_samples, id2label]
 
 
     def _load_text(self, dir_data):
         id2label = set()
 
-        if self.format_data == "conll":
+        if self.config.format == "conll":
             if os.path.isdir(dir_data):
                 files = glob.glob(os.path.join(dir_data, "*.txt"))
             else:
                 files = [dir_data]
-            with Pool(processes=2) as p:
+            with multiprocessing.Pool(processes=multiprocessing.cpu_count()//2) as p:
                 tmp_samples = list(tqdm(p.imap_unordered(self.load_conll, files),
                                     total=len(files), desc="Loading data"))
 
-            for (samples, failed_samples, id2label_) in tmp_samples:
+            for i, (samples, failed_samples, id2label_) in enumerate(tmp_samples):
                 sample_by_type = defaultdict(list)
                 for sample in tqdm(samples):
                     sample_type = check_entity_type_sample(sample)
                     sample_by_type[sample_type].append(sample)
                 samples = balance_data(sample_by_type)
+                # tmp_samples[i] = (samples, failed_samples, id2label_)
                 self.samples.extend(samples)
                 self.failed_samples.update(failed_samples)
                 id2label.update(id2label_)
+            # merge samples so a batch will have as much language as possible
+            # for 
 
-        elif self.format_data == "flatten" and dir_data.endswith(".src"):
+        elif self.config.format == "flatten" and dir_data.endswith(".src"):
             with open(dir_data) as f_src, open(
                 dir_data.replace(".src", ".tgt")
             ) as f_tgt:
@@ -186,7 +178,7 @@ class NERDataset(torch.utils.data.Dataset):
                     total=len(sentences),
                     bar_format="{l_bar}{bar:30}{r_bar}{bar:-10b}",
                 ):
-                    if self.lower:
+                    if self.config.lower:
                         sent = sent.lower()
                     tokens = sent.strip().split()
                     tags = label.strip().split()
@@ -195,7 +187,7 @@ class NERDataset(torch.utils.data.Dataset):
                     # self.add_sample({"words": tokens, "tags": tags})
                     self.id2label.update(tags)
 
-                    if self.augment_lower and not self.lower:
+                    if self.config.augment_lower and not self.config.lower:
                         # lower
                         self.samples.append(
                             {"words": [token.lower() for token in tokens], "tags": tags}
@@ -237,7 +229,10 @@ class NERDataset(torch.utils.data.Dataset):
             input_ids += [self.tokenizer.pad_token_id] * (
                 self.max_seq_length - len(input_ids)
             )
-            labels += [self.label2id["X"]] * (len(input_ids) - len(labels))
+            if not self.config.use_crf:
+                labels += [self.label2id["X"]] * (len(input_ids) - len(labels))
+            else:
+                labels += [self.label2id["O"]] * (len(input_ids) - len(labels))
             attention_mask += [0] * (len(input_ids) - len(attention_mask))
 
         return {
@@ -269,11 +264,11 @@ def balance_data(sample_by_type: dict):
     #         sample["words"].append(parts[0])
     #         sample["tags"].append(parts[-1])
     
-    min_num_sample = len(sample_by_type["O"])
+    min_num_sample = float('inf')
     print("\n## BEFORE ##\n")
     for key, samples in sample_by_type.items():
         print(key, len(samples))
-        if key in ["O", "GENERAL"]:
+        if key in ["O", "GENERAL", "MISC"]:
             continue
         if len(samples) < min_num_sample:
             min_num_sample = len(samples)

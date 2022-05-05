@@ -56,9 +56,10 @@ parser.add_argument("--lower", action="store_true", help="lowercase the training
 def compute_metrics(pred):
     labels = pred.label_ids
     preds = pred.predictions
-    preds = preds.argmax(-1)
+    if not config.use_crf:
+        preds = preds.argmax(-1)
 
-    mapping = lambda i: id2label[i]
+    mapping = lambda i: id2label.get(i, "O")
     v_func = np.vectorize(mapping)
     labels = v_func(labels).tolist()
     preds = v_func(preds).tolist()

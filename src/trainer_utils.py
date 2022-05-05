@@ -12,11 +12,15 @@ class CustomTrainer(Trainer):
         labels = inputs.get("labels").to("cpu")
         # forward pass
         outputs = model(**inputs)
-        logits = outputs.get("logits").to("cpu")
+        if not model.config.use_crf:
+            logits = outputs.get("logits").to("cpu")
+            # compute custom loss (suppose one has 3 labels with different weights)
+            loss_fct = nn.CrossEntropyLoss(ignore_index=-100)
+            loss = loss_fct(logits.view(-1, self.model.config.num_labels), labels.view(-1))
+        else:
+            loss = outputs.get("loss")
         # print(labels.is_cuda, logits.is_cuda)
         # compute custom loss (suppose one has 3 labels with different weights)
-        loss_fct = nn.CrossEntropyLoss(ignore_index=-100)
-        loss = loss_fct(logits.view(-1, self.model.config.num_labels), labels.view(-1))
         return (loss, outputs) if return_outputs else loss
     
     

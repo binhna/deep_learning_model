@@ -38,8 +38,11 @@ if __name__ == "__main__":
         )
         with torch.no_grad():
             output = model(**inputs)
-            logits = output.get("logits")
-            preds = torch.argmax(logits, dim=-1)[0].numpy()
+            if not model.config.use_crf:
+                logits = output.get("logits")
+                preds = torch.argmax(logits, dim=-1)[0].numpy()
+            else:
+                preds = output.get("tags")[0].numpy()
             index_end = inputs["input_ids"][0].tolist().index(tokenizer.sep_token_id)
             print(preds[1:index_end])
             preds = [config.id2label[idx] for idx in preds]

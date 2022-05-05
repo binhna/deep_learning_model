@@ -10,15 +10,17 @@ def get_span(ids, tags, subid2id, ignored_ids, tokenizer):
     result = defaultdict(list)
     tmp_ids = []
     current_tag = None
+    # print(ignored_ids)
     for i, (id, tag) in enumerate(zip(ids, tags)):
-        if i in ignored_ids:
-            continue
-        elif tag.startswith("B"):
+        # print(tmp_ids)
+        # if i in ignored_ids:
+        #     continue
+        if tag.startswith("B"):
             if tmp_ids:
                 result[current_tag].append(tmp_ids)
             current_tag = tag[2:]
             tmp_ids = [i]
-        elif tag.startswith("I"):
+        elif tag.startswith("I") or tag.startswith("X"):
             tmp_ids.append(i)
             current_tag = tag[2:] if not current_tag else current_tag
         else:
@@ -29,12 +31,14 @@ def get_span(ids, tags, subid2id, ignored_ids, tokenizer):
     if tmp_ids and current_tag:
         result[current_tag].append(tmp_ids)
 
+    print(tags)
+    print(result)
     result_span = defaultdict(list)
     for tag, list_ids in result.items():
         for ids_ in list_ids:
-            tmp_ids = []
-            for id in ids_:
-                tmp_ids.extend(ids[subid2id[id]])
+            tmp_ids = [ids[id] for id in ids_]
+            # for id in ids_:
+            #     tmp_ids.extend(ids[subid2id[id]])
             result_span[tag].append(tokenizer.decode(tmp_ids).strip())
     print(dict(result_span))
     return result_span
@@ -42,8 +46,11 @@ def get_span(ids, tags, subid2id, ignored_ids, tokenizer):
 
 ## Load model
 device = "cpu"
-model_path = "./model/viSystemEntity"
-tokenizer = AutoTokenizer.from_pretrained("../shared_data/xlmr_6L", add_prefix_space=True)
+model_path = "./model/mSystemEntity"
+try:
+    tokenizer = AutoTokenizer.from_pretrained(model_path, add_prefix_space=True)
+except:
+    tokenizer = AutoTokenizer.from_pretrained("../shared_data/xlmr_6L", add_prefix_space=True)
 config = AutoConfig.from_pretrained(model_path)
 
 # adapter
