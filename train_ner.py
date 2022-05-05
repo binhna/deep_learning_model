@@ -16,7 +16,7 @@ parser.add_argument(
 parser.add_argument("--valid-path", required=True, type=str, help="path of valid data")
 parser.add_argument("--test-path", type=str, default=None, help="path of test data")
 parser.add_argument("--batch-size", type=int, default=32, help="batch size")
-parser.add_argument("--lr", type=float, default=0.0001, help="learning rate")
+parser.add_argument("--lr", type=float, default=0.001, help="learning rate")
 parser.add_argument("--use-crf", action="store_true", help="whether to use crf layer")
 parser.add_argument("--epoch", type=int, default=5, help="number of epoch")
 parser.add_argument("--do-train", action="store_true")
@@ -55,10 +55,10 @@ parser.add_argument(
     help="task name for the adapter",
 )
 parser.add_argument(
-    "--accu_step",
+    "--accumulation_step",
     type=int,
     default=1,
-    help="task name for the adapter",
+    help="accumulation step for calculate ",
 )
 parser.add_argument(
     "--metric_for_best",
@@ -106,7 +106,7 @@ if __name__ == "__main__":
     # valid_dataloader = DataLoader(valid_data, batch_size=args.batch_size, shuffle=False)
 
 
-    model = NERModel(config=config, tokenizer=tokenizer)
+    model = torch.jit.script(NERModel(config=config, tokenizer=tokenizer))
     model.to(device)
     # model = model.from_pretrained(args.model_path, config=config)
 

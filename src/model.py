@@ -9,7 +9,8 @@ class NERModel(torch.nn.Module):
     def __init__(self, config, tokenizer):
         super(NERModel, self).__init__()
         self.config = config
-        self.tokenizer = tokenizer
+        # self.tokenizer = tokenizer
+        self.id2label = config.id2label
         self.embedding = nn.Embedding(
             num_embeddings=len(tokenizer.token2id),
             embedding_dim=config.embedding_dim,
@@ -44,9 +45,8 @@ class NERModel(torch.nn.Module):
             config.tf_embedding_dim, self.config.num_labels
         )
         self.dropout = nn.Dropout(config.dropout)
-        # self.crf_layer = torch.jit.script(
-        #     CRF(self.config.num_labels, batch_first=True)
-        # )
+        # if self.config.use_crf:
+        self.crf_layer = torch.jit.script(CRF(self.config.num_labels, batch_first=True))
         # self.pad_word_len = self.config.pad_word_len
         # dictionary = tokenizer.get_ord_map(self.config.dictionary)
         # self.ord2char = dictionary["ord2char"]
@@ -57,7 +57,7 @@ class NERModel(torch.nn.Module):
         # self.PAD_SEM_HASH_TOKEN = tokenizer.PAD_SEM_HASH_TOKEN
         # self.padding_idx = config.dictionary["hash2idx"][tokenizer.PAD_TOKEN]
 
-    def forward(self, input_ids, lengths=None, labels=None):
+    def forward(self, input_ids):
         # batch x num_subwords
         # batch_size = src_tokens.size(0)
         # num_words = src_tokens.size(1) // self.pad_word_len
@@ -66,7 +66,7 @@ class NERModel(torch.nn.Module):
 
         # batch x num_subwords x embedding dim
         src_tokens_embedding = self.embedding(input_ids)
-        
+
         # batch x num_subwords x embedding dim
         words_embedding = self.cnn_head(src_tokens_embedding)
         words_embedding = self.dropout(words_embedding)
@@ -79,34 +79,38 @@ class NERModel(torch.nn.Module):
         # )
         # batch x num_subwords x tf hidden size
         sentence_embedding = torch.tanh(self.linear_hidden(words_embedding))
+        # print("sentence_embedding", sentence_embedding.size())
+        sentence_embedding = sentence_embedding.squeeze(1)
 
-        # account for padding while computing the representation
-        padding_mask = input_ids.eq(self.tokenizer.pad_token_id).to(input_ids.device)
-        x = sentence_embedding
-        if padding_mask is not None:
-            x = x * (1 - padding_mask.unsqueeze(-1).type_as(x))
+        # # account for padding while computing the representation
+        # padding_mask = input_ids.eq(self.tokenizer.pad_token_id).to(input_ids.device)
+        # x = sentence_embedding
+        # if padding_mask is not None:
+        #     x = x * (1 - padding_mask.unsqueeze(-1).type_as(x))
 
-        # B x T x C -> T x B x C
-        # x = x.transpose(0, 1)
-        for layer in self.transformer_head:
-            x = layer(x, src_key_padding_mask=padding_mask)
+        # # B x T x C -> T x B x C
+        # # x = x.transpose(0, 1)
+        # for layer in self.transformer_head:
+        #     x = layer(x, src_key_padding_mask=padding_mask)
 
         # sentence_embedding = x.transpose(0, 1)
+        # if self.config.task == "text_classification":
+        #     x = torch.max(x, dim=1).values
+        # print(x.size())
 
         # batch x num subwords x num tags
-        logits = self.features_transforms(x)
+        logits = self.features_transforms(sentence_embedding)
 
-        if self.config.task == "text_classification":
-            logits = logits[:, 0, :] # first word
+        # if self.config.task == "text_classification":
+        # print(logits.size())
+        # logits = logits[:, 0, :] # first word
 
         # print("labels", labels.size())
         # print("logits", logits.size())
-        loss_fct = nn.CrossEntropyLoss(ignore_index=-100)
-        loss = loss_fct(
-            logits.view(-1, self.config.num_labels), labels.view(-1)
-        )
+        # loss_fct = nn.CrossEntropyLoss()
+        # loss = loss_fct(logits.view(-1, self.config.num_labels), labels.view(-1))
 
-        return {"logits": logits, "loss": loss}
+        return {"logits": logits}
 
     @torch.jit.export
     def decode(self, src_tokens):
@@ -117,11 +121,12 @@ class NERModel(torch.nn.Module):
         sentence_embedding = torch.tanh(self.linear_hidden(words_embedding))
         logits = self.features_transforms(sentence_embedding)
 
-        return logits
-        # return [
-        #     [self.tokenizer.id2label[idx] for idx in item]
-        #     for item in self.crf_layer.decode(logits)
-        # ]
+        # if self.config.use_crf:
+        return [
+            [self.id2label[idx] for idx in item]
+            for item in self.crf_layer.decode(logits)
+        ]
+        # return logits
 
     @torch.jit.export
     def encode_input(self, char_ord_input):
@@ -171,16 +176,22 @@ class CNNSubwordLevelBN(torch.nn.Module):
     def __init__(self, config):
         super(CNNSubwordLevelBN, self).__init__()
 
+        # self.config = config
         self._embedding_dim = config.embedding_dim
         self._num_filters = config.embedding_dim // len(config.semhash_window_sizes)
         self.semhash_window_sizes = config.semhash_window_sizes
         self._convolution_layers = torch.nn.ModuleList(
             [
-                nn.Conv1d(
-                    in_channels=self._embedding_dim,
-                    out_channels=self._num_filters,
-                    kernel_size=window_size,
-                    padding="same",
+                torch.nn.ModuleList(
+                    [
+                        nn.Conv1d(
+                            in_channels=self._embedding_dim,
+                            out_channels=self._num_filters,
+                            kernel_size=window_size,
+                            padding="same",
+                        ),
+                        torch.nn.BatchNorm1d(self._num_filters),
+                    ]
                 )
                 for window_size in self.semhash_window_sizes
             ]
@@ -199,7 +210,17 @@ class CNNSubwordLevelBN(torch.nn.Module):
 
         filter_outputs = []
         for convolution_layer in self._convolution_layers:
-            filter_outputs.append(self.activation(convolution_layer(tokens)))
+            filter_outputs.append(
+                self.activation(convolution_layer[1](convolution_layer[0](tokens)))
+            )
+
+        # if self.config.task == "text_classification":
+        filter_outputs = [
+            torch.nn.functional.max_pool1d(
+                x_conv, kernel_size=x_conv.size()[-1]
+            ).squeeze(-1)
+            for x_conv in filter_outputs
+        ]
 
         output = (
             torch.cat(filter_outputs, dim=1)
@@ -207,4 +228,4 @@ class CNNSubwordLevelBN(torch.nn.Module):
             else filter_outputs[0]
         )
 
-        return output.view(batch_size, num_tokens, embedding_dim)
+        return output.view(batch_size, -1, embedding_dim)

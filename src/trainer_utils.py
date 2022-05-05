@@ -8,19 +8,18 @@ from torch.utils.data import DataLoader
 from torch.optim import AdamW
 from transformers import get_linear_schedule_with_warmup
 from seqeval.metrics import f1_score, classification_report
+from sklearn.metrics import classification_report as classification_report_sklearn
 
 
-def compute_loss(model, inputs, return_outputs=False):
-    labels = inputs.get("labels")
+def compute_loss(model, input_ids, labels, config, return_outputs=False):
     # forward pass
-    # print(inputs)
-    outputs = model(**inputs)
-    if not model.config.use_crf:
+    outputs = model(input_ids)
+    if not config.use_crf:
         logits = outputs.get("logits")
         # compute custom loss (suppose one has 3 labels with different weights)
         loss_fct = nn.CrossEntropyLoss(ignore_index=-100)
         loss = loss_fct(
-            logits.view(-1, model.config.num_labels), labels.view(-1)
+            logits.view(-1, config.num_labels), labels.view(-1)
         )
     else:
         loss = outputs.get("loss")
@@ -70,35 +69,41 @@ def train(model, train_dataset, config, eval_dataset=None):
     max_score = 0
 
     for epoch in range(config.epoch):
+        model.to(config.device)
         loss_epoch = 0
         for i, batch in enumerate(dataloader):
-            batch = {
-                "input_ids": batch["input_ids"].to(config.device),
-                "labels": batch["labels"].to(config.device),
-                "lengths": batch["lengths"],
-            }
-            loss = compute_loss(model, batch)
+            input_ids = batch["input_ids"].to(config.device)
+            labels = batch["labels"].to(config.device)
+            optimizer.zero_grad(set_to_none=True)
+            loss = compute_loss(model, input_ids, labels, config)
             loss.backward()
-            if (i + 1) % config.accu_step == 0:
-                nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-                optimizer.step()
-                scheduler.step()
-                # model.zero_grad()
-                optimizer.zero_grad(set_to_none=True)
+            # if (i + 1) % config.accumulation_step == 0:
+            nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            optimizer.step()
+            scheduler.step()
+            # model.zero_grad()
             
             loss_epoch += loss.item()
         
         print(f"avg loss epoch {epoch+1}:", loss_epoch/(i+1))
         if config.do_eval:
+            _ = evaluate(model, train_dataset, config)
             result = evaluate(model, eval_dataset, config)
             if result[config.metric_for_best] > max_score:
                 print(f"Saving new best model with {config.metric_for_best} @ {result[config.metric_for_best]}")
                 max_score = result[config.metric_for_best]
                 torch.save(model.state_dict(), os.path.join(config.output_dir, f'best_model_{config.metric_for_best}_{config.task_name}.pt'))
+                
+                # torch script model
+                model.eval()
+                cpu_model = model.cpu()
+                torch.jit.save(cpu_model, os.path.join(config.output_dir, f'best_model_{config.metric_for_best}_{config.task_name}_torchscript.pt'))
+                
                 with open(os.path.join(config.output_dir, f"config.json"), "w") as f:
                     json.dump(config.to_dict(), f, ensure_ascii=False)
             print("===================================")
             model.train()
+    print(f"Best model with {config.metric_for_best}: {max_score}")
 
 
 
@@ -110,20 +115,17 @@ def evaluate(model, dataset, config):
     entity_pred, entity_gold = [], []
     with torch.no_grad():
         for batch in dataloader:
-            batch = {
-                "input_ids": batch["input_ids"].to(config.device),
-                "labels": batch["labels"].to(config.device),
-                "lengths": batch["lengths"],
-            }
-            loss, outputs = compute_loss(model, batch, return_outputs=True)
+            input_ids = batch["input_ids"].to(config.device)
+            labels = batch["labels"].to(config.device)
+            _, outputs = compute_loss(model, input_ids, labels, config, return_outputs=True)
             entity_logits = outputs.get("logits")
             entity_outputs = torch.argmax(entity_logits, dim=-1)
             entity_outputs = entity_outputs.detach().cpu().numpy()
-            if model.config.task == "text_classification":
+            if config.task == "text_classification":
                 entity_labels = torch.squeeze(batch["labels"], -1).detach().cpu().numpy()
                 entity_pred.extend(entity_outputs)
                 entity_gold.extend(entity_labels)
-            elif model.config.task == "seq_tagging":
+            elif config.task == "seq_tagging":
                 entity_labels = batch["labels"].detach().cpu().numpy()
             
                 for pred, gold in zip(entity_outputs, entity_labels):
@@ -132,18 +134,22 @@ def evaluate(model, dataset, config):
                     entity_pred.append(pred[:len(gold)])
                     entity_gold.append(gold)
     
-    if model.config.task == "seq_tagging":
+    if config.task == "seq_tagging":
         # exact match
         em = [np.array_equal(pred_, label_) for pred_, label_ in zip(entity_pred, entity_gold)]
         em = sum(em) / len(em)
         f1 = f1_score(entity_gold, entity_pred, average="macro")
         print(classification_report(entity_gold, entity_pred))
-    elif model.config.task == "text_classification":
+    elif config.task == "text_classification":
         # print(entity_pred[:10], entity_gold[:10])
         # print(entity_pred == entity_gold)
+        entity_gold = [config.id2label[idx] for idx in entity_gold]
+        entity_pred = [config.id2label[idx] for idx in entity_pred]
+        result = classification_report_sklearn(entity_gold, entity_pred, zero_division=0)
+        print(result)
+        result = result = classification_report_sklearn(entity_gold, entity_pred, output_dict=True, zero_division=0)
         em = sum(np.array(entity_pred) == np.array(entity_gold))/len(entity_pred)
-        f1 = 0
-        print("em", em)
+        f1 = result["macro avg"]["f1-score"]
     return {"f1": f1, "em": em}
 
 

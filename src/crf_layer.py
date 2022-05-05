@@ -143,13 +143,13 @@ class CRF(nn.Module):
             if emissions.shape[:2] != tags.shape:
                 raise ValueError(
                     'the first two dimensions of emissions and tags must match, '
-                    f'got {tuple(emissions.shape[:2])} and {tuple(tags.shape)}')
+                    f'got {emissions.shape[:2]} and {tags.shape}')
 
         if mask is not None:
             if emissions.shape[:2] != mask.shape:
                 raise ValueError(
                     'the first two dimensions of emissions and mask must match, '
-                    f'got {tuple(emissions.shape[:2])} and {tuple(mask.shape)}')
+                    f'got {emissions.shape[:2]} and {mask.shape}')
             no_empty_seq = not self.batch_first and mask[0].all()
             no_empty_seq_bf = self.batch_first and mask[:, 0].all()
             if not no_empty_seq and not no_empty_seq_bf:
@@ -302,17 +302,18 @@ class CRF(nn.Module):
 
         # shape: (batch_size,)
         seq_ends = mask.long().sum(dim=0) - 1
-        best_tags_list = []
+        best_tags_list: List[List[int]] = []
 
         for idx in range(batch_size):
             # Find the tag which maximizes the score at the last timestep; this is our best tag
             # for the last timestep
             _, best_last_tag = score[idx].max(dim=0)
-            best_tags = [best_last_tag.item()]
+            best_tags = [int(best_last_tag.item())]
 
             # We trace back where the best last tag comes from, append that to our best tag
             # sequence, and trace it back again, and so on
-            for hist in reversed(history[:seq_ends[idx]]):
+            for his_idx in range(len(history[:seq_ends[idx]]) - 1, -1, -1):
+                hist = history[:seq_ends[idx]][his_idx]
                 best_last_tag = hist[idx][best_tags[-1]]
                 best_tags.append(best_last_tag.item())
 
