@@ -1,11 +1,12 @@
 CUDA_VISIBLE_DEVICES=0 python train_ner.py \
-    --model-path ../../shared_data/bdi_roberta_4L_oscarwiki_envi/ \
+    --model-path ../../shared_data/convLM \
+    --batch-size 16 \
     --format conll \
-    --train-path data/mSystemEntity/train/vi.txt \
-    --valid-path data/mSystemEntity/valid/vi.txt \
+    --train-path data/entity_dialogue/entity_dialogue_train.txt \
+    --valid-path data/entity_dialogue/entity_dialogue_valid.txt \
     --freeze_layer_count 0 \
     --epoch 10 \
     --do-eval \
     --do-train \
-    --output-dir model/viSystemEntity \
+    --output-dir model/dialogEntityConvLM \
     --use-crf

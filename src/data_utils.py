@@ -76,7 +76,13 @@ class NERDataset(torch.utils.data.Dataset):
                             {"words": [token.lower() for token in tokens], "tags": tags}
                         )
 
-        id2label = sorted(list(id2label))
+        id2label = list(id2label)
+        for label in id2label:
+            if label.startswith("B-"):
+                label = label.replace("B-", "I-")
+                if label not in id2label:
+                    id2label.append(label)
+        id2label = sorted(id2label, reverse=True)
         self.id2label = {i: tag for i, tag in enumerate(id2label)} if not self.config.id2label else self.config.id2label
         if not self.config.use_crf:
             self.id2label[-100] = "X"
@@ -117,12 +123,13 @@ class NERDataset(torch.utils.data.Dataset):
         labels = [self.label2id["O"]] + labels + [self.label2id["O"]]
         attention_mask = [1] * len(input_ids)
 
-        if len(input_ids) < self.max_seq_length:
-            input_ids += [self.tokenizer.pad_token_id] * (
-                self.max_seq_length - len(input_ids)
-            )
-            labels += [self.label2id["O"]] * (len(input_ids) - len(labels))
-            attention_mask += [0] * (len(input_ids) - len(attention_mask))
+        # padding will be moved to batch collator
+        # if len(input_ids) < self.max_seq_length:
+        #     input_ids += [self.tokenizer.pad_token_id] * (
+        #         self.max_seq_length - len(input_ids)
+        #     )
+        #     labels += [self.label2id["O"]] * (len(input_ids) - len(labels))
+        #     attention_mask += [0] * (len(input_ids) - len(attention_mask))
 
         return {
             "input_ids": torch.LongTensor(input_ids),

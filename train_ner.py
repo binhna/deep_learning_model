@@ -3,6 +3,7 @@ import numpy as np
 from seqeval.metrics import f1_score, classification_report
 from argparse import ArgumentParser
 from transformers import AutoConfig, AutoTokenizer, TrainingArguments
+from torch.nn.utils.rnn import pad_sequence
 
 from src.data_utils import NERDataset
 from src.model import RobertaNER
@@ -53,13 +54,29 @@ parser.add_argument(
 parser.add_argument("--lower", action="store_true", help="lowercase the training data")
 
 
+def custom_collator(batch):
+    input_ids = [sample["input_ids"] for sample in batch]
+    labels = [sample["labels"] for sample in batch]
+    attention_mask = [sample["attention_mask"] for sample in batch]
+
+    input_ids = pad_sequence(input_ids, batch_first=True, padding_value=0)
+    labels = pad_sequence(labels, batch_first=True, padding_value=0)
+    attention_mask = pad_sequence(attention_mask, batch_first=True, padding_value=0)
+
+    return {
+        "input_ids": input_ids,
+        "labels": labels,
+        "attention_mask": attention_mask,
+    }
+
+
 def compute_metrics(pred):
     labels = pred.label_ids
     preds = pred.predictions
     if not config.use_crf:
         preds = preds.argmax(-1)
 
-    mapping = lambda i: id2label[i]
+    mapping = lambda i: id2label.get(i, "O")
     v_func = np.vectorize(mapping)
     labels = v_func(labels).tolist()
     preds = v_func(preds).tolist()
@@ -94,10 +111,14 @@ if __name__ == "__main__":
     config.num_labels = train_data.get_num_labels()
     # train_dataloader = DataLoader(train_data, batch_size=args.batch_size, shuffle=True)
     valid_data = NERDataset(args.valid_path, tokenizer=tokenizer, config=config)
-    assert train_data.id2label == valid_data.id2label and train_data.label2id == valid_data.label2id
+    assert (
+        train_data.id2label == valid_data.id2label
+        and train_data.label2id == valid_data.label2id
+    )
+    # print(train_data.id2label)
     # valid_dataloader = DataLoader(valid_data, batch_size=args.batch_size, shuffle=False)
 
-    step_eval = int(0.25*len(train_data)//config.batch_size)
+    step_eval = int(0.25 * len(train_data) // config.batch_size)
     # Cứ theo config này thì model sẽ auto lưu lại best model theo điểm f1 (nhớ phải define hàm compute_metrics để output ra f1)
     training_args = TrainingArguments(
         output_dir=args.output_dir,
@@ -129,6 +150,7 @@ if __name__ == "__main__":
         train_dataset=train_data,
         eval_dataset=valid_data,
         compute_metrics=compute_metrics,
+        data_collator=custom_collator,
     )
     if args.do_train:
         train_result = trainer.train(
