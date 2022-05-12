@@ -2,11 +2,17 @@ import os
 import numpy as np
 from seqeval.metrics import f1_score, classification_report
 from argparse import ArgumentParser
-from transformers import AutoConfig, AutoTokenizer, TrainingArguments
+from transformers import (
+    AutoConfig,
+    AutoTokenizer,
+    TrainingArguments,
+    get_linear_schedule_with_warmup,
+)
 from torch.nn.utils.rnn import pad_sequence
+import torch
 
-from src.data_utils import NERDataset
-from src.model import RobertaNER
+from src.data_utils import ConVExDataset
+from src.model import ConVEx
 from src.trainer_utils import CustomTrainer
 
 parser = ArgumentParser()
@@ -14,16 +20,12 @@ parser = ArgumentParser()
 parser.add_argument(
     "--model-path", required=True, type=str, help="model pretrained path"
 )
-parser.add_argument(
-    "--train-path", required=True, type=str, help="path of training data"
-)
+parser.add_argument("--train-path", type=str, help="path of training data")
 parser.add_argument("--freeze_layer_count", type=int, default=-1, help="freeze layer")
-parser.add_argument("--valid-path", required=True, type=str, help="path of valid data")
+parser.add_argument("--valid-path", type=str, help="path of valid data")
 parser.add_argument("--test-path", type=str, default=None, help="path of test data")
 parser.add_argument("--batch-size", type=int, default=32, help="batch size")
-parser.add_argument("--lr", type=float, default=0.0001, help="learning rate")
-parser.add_argument("--use-crf", action="store_true", help="whether to use crf layer")
-parser.add_argument("--use-adapter", action="store_true", help="whether to use adapter")
+parser.add_argument("--lr", type=float, default=0.3, help="learning rate")
 parser.add_argument("--epoch", type=int, default=5, help="number of epoch")
 parser.add_argument("--do-train", action="store_true")
 parser.add_argument("--do-eval", action="store_true")
@@ -34,17 +36,17 @@ parser.add_argument(
     "--output-dir", type=str, default="model", help="output dir for the model"
 )
 parser.add_argument(
-    "--format",
-    type=str,
-    default="conll",
-    choices=["conll", "flatten"],
-    help="format of the training data",
-)
-parser.add_argument(
     "--augment_lower",
     action="store_true",
     help="whether to augment data with lowercase",
 )
+
+parser.add_argument(
+    "--finetuning",
+    action="store_true",
+    help="whether to pretraining or finetuning",
+)
+
 parser.add_argument(
     "--task-name",
     type=str,
@@ -52,29 +54,41 @@ parser.add_argument(
     help="task name for the adapter",
 )
 parser.add_argument("--lower", action="store_true", help="lowercase the training data")
+parser.add_argument("--template_fnn_size", type=int, default=128)
+parser.add_argument("--input_fnn_size", type=int, default=128)
+parser.add_argument("--num_heads", type=int, default=2)
 
 
 def custom_collator(batch):
     input_ids = [sample["input_ids"] for sample in batch]
     labels = [sample["labels"] for sample in batch]
-    attention_mask = [sample["attention_mask"] for sample in batch]
+    input_attention_mask = [sample["input_attention_mask"] for sample in batch]
+
+    template_ids = [sample["template_ids"] for sample in batch]
+    template_attention_mask = [sample["template_attention_mask"] for sample in batch]
 
     input_ids = pad_sequence(input_ids, batch_first=True, padding_value=0)
     labels = pad_sequence(labels, batch_first=True, padding_value=0)
-    attention_mask = pad_sequence(attention_mask, batch_first=True, padding_value=0)
+    input_attention_mask = pad_sequence(
+        input_attention_mask, batch_first=True, padding_value=0
+    )
+    template_ids = pad_sequence(template_ids, batch_first=True, padding_value=0)
+    template_attention_mask = pad_sequence(
+        template_attention_mask, batch_first=True, padding_value=0
+    )
 
     return {
+        "template_ids": template_ids,
+        "template_attention_mask": template_attention_mask,
         "input_ids": input_ids,
+        "input_attention_mask": input_attention_mask,
         "labels": labels,
-        "attention_mask": attention_mask,
     }
 
 
 def compute_metrics(pred):
     labels = pred.label_ids
     preds = pred.predictions
-    if not config.use_crf:
-        preds = preds.argmax(-1)
 
     mapping = lambda i: id2label.get(i, "O")
     v_func = np.vectorize(mapping)
@@ -91,7 +105,7 @@ def compute_metrics(pred):
     em = sum(em) / len(em)
 
     print(classification_report(labels, preds))
-    f1 = f1_score(labels, preds, average="macro")
+    f1 = f1_score(labels, preds, average="micro")
     return {"f1": f1, "em": em}
 
 
@@ -105,12 +119,15 @@ if __name__ == "__main__":
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)
 
-    config.id2label, config.label2id = None, None
-    train_data = NERDataset(args.train_path, tokenizer=tokenizer, config=config)
-    config.id2label, config.label2id = train_data.id2label, train_data.label2id
+    config.id2label, config.label2id = {0: "O", 1: "B-PHRASE", 2: "I-PHRASE"}, {
+        "O": 0,
+        "B-PHRASE": 1,
+        "I-PHRASE": 2,
+    }
+    train_data = ConVExDataset(args.train_path, tokenizer=tokenizer, config=config)
     config.num_labels = train_data.get_num_labels()
     # train_dataloader = DataLoader(train_data, batch_size=args.batch_size, shuffle=True)
-    valid_data = NERDataset(args.valid_path, tokenizer=tokenizer, config=config)
+    valid_data = ConVExDataset(args.valid_path, tokenizer=tokenizer, config=config)
     assert (
         train_data.id2label == valid_data.id2label
         and train_data.label2id == valid_data.label2id
@@ -141,8 +158,18 @@ if __name__ == "__main__":
 
     id2label = config.id2label
 
-    model = RobertaNER(config=config)
+    model = ConVEx(config=config)
     model = model.from_pretrained(args.model_path, config=config)
+
+    optimizer = torch.optim.Adadelta(
+        params=model.parameters(), lr=config.lr, weight_decay=0.9
+    )
+    total_training_step = config.epoch * len(train_data) / config.batch_size
+    scheduler = get_linear_schedule_with_warmup(
+        optimizer=optimizer,
+        num_warmup_steps=int(total_training_step*0.05),
+        num_training_steps=total_training_step,
+    )
 
     trainer = CustomTrainer(
         model=model,
@@ -151,6 +178,7 @@ if __name__ == "__main__":
         eval_dataset=valid_data,
         compute_metrics=compute_metrics,
         data_collator=custom_collator,
+        optimizers=(optimizer, scheduler),
     )
     if args.do_train:
         train_result = trainer.train(
