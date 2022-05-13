@@ -1,0 +1,10 @@
+numpy==1.19.4
+seqeval==1.2.2
+tqdm==4.62.3
+torch==1.10.0+cu113
+underthesea==1.1.17
+adapter_transformers==2.3.0
+joblib==0.13.2
+beautifulsoup4==4.11.1
+scikit_learn==1.1.0
+transformers==4.19.0

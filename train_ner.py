@@ -25,7 +25,7 @@ parser.add_argument("--freeze_layer_count", type=int, default=-1, help="freeze l
 parser.add_argument("--valid-path", type=str, help="path of valid data")
 parser.add_argument("--test-path", type=str, default=None, help="path of test data")
 parser.add_argument("--batch-size", type=int, default=32, help="batch size")
-parser.add_argument("--lr", type=float, default=0.3, help="learning rate")
+parser.add_argument("--lr", type=float, default=0.003, help="learning rate")
 parser.add_argument("--epoch", type=int, default=5, help="number of epoch")
 parser.add_argument("--do-train", action="store_true")
 parser.add_argument("--do-eval", action="store_true")
@@ -150,6 +150,7 @@ if __name__ == "__main__":
         save_steps=step_eval,
         save_strategy="steps",
         metric_for_best_model="f1",
+        logging_steps=int(0.05 * len(train_data) // config.batch_size),
         push_to_hub=False,
         overwrite_output_dir=True,
         save_total_limit=1,
@@ -178,7 +179,7 @@ if __name__ == "__main__":
         eval_dataset=valid_data,
         compute_metrics=compute_metrics,
         data_collator=custom_collator,
-        optimizers=(optimizer, scheduler),
+        # optimizers=(optimizer, scheduler),
     )
     if args.do_train:
         train_result = trainer.train(

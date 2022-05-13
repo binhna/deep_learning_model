@@ -9,12 +9,19 @@ from transformers.trainer import unwrap_model
 
 class CustomTrainer(Trainer):
     def compute_loss(self, model, inputs, return_outputs=False):
-        # labels = inputs.get("labels")
-        # forward pass
-        # print(inputs)
         outputs = model(**inputs)
         loss = outputs.get("loss")
         return (loss, outputs) if return_outputs else loss
+    
+    def get_train_dataloader(self):
+        return torch.utils.data.DataLoader(
+            self.train_dataset,
+            batch_size=self.args.train_batch_size,
+            collate_fn=self.data_collator,
+            drop_last=self.args.dataloader_drop_last,
+            num_workers=self.args.dataloader_num_workers,
+            pin_memory=self.args.dataloader_pin_memory,
+        )
     
     
     def _save(self, output_dir: Optional[str] = None, state_dict=None):
@@ -36,11 +43,6 @@ class CustomTrainer(Trainer):
                 torch.save(state_dict, os.path.join(output_dir, "pytorch_model.bin"))
         else:            
             self.model.config.to_json_file(os.path.join(output_dir, 'config.json'))
-            # if self.model.use_adapter:
-            #     self.model.roberta.save_all_adapters(output_dir)
-            #     if hasattr(self.model, "classifier"):
-            #         torch.save(self.model.classifier.state_dict(), os.path.join(output_dir, "classifier.bin"))
-            # else:
             self.model.save_pretrained(output_dir, state_dict=state_dict)
                 
         if self.tokenizer is not None:

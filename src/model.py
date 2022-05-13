@@ -49,27 +49,6 @@ class ConVEx(RobertaPreTrainedModel):
 
         self.classifier = torch.nn.Linear(config.input_fnn_size, config.num_labels)
 
-        # self.self_att = torch.nn.MultiheadAttention(
-        #     config.input_fnn_size,
-        #     config.num_heads,
-        #     dropout=config.hidden_dropout_prob,
-        #     batch_first=True,
-        # )
-        # self.layer_norm_1 = torch.nn.LayerNorm(config.input_fnn_size)
-
-        # self.att = torch.nn.MultiheadAttention(
-        #     config.input_fnn_size,
-        #     config.num_heads,
-        #     dropout=config.hidden_dropout_prob,
-        #     batch_first=True,
-        # )
-
-        # self.layer_norm_2 = torch.nn.LayerNorm(config.input_fnn_size)
-
-        # self.classifier = torch.nn.Linear(config.input_fnn_size, self.config.num_labels)
-
-        # self.layer_norm_3 = torch.nn.LayerNorm(config.num_labels)
-
         self.crf_layer = CRF(num_tags=self.config.num_labels, batch_first=True)
 
         self.dropout = torch.nn.Dropout(
@@ -136,11 +115,9 @@ class ConVEx(RobertaPreTrainedModel):
                 value=outputs_input,
                 key_padding_mask=input_attention_mask,
             )
-            # print("output self_att", outputs_input.size())
             # batch x seq x input_fnn_dim
-            outputs_input = block["layer_norm_1"](outputs_input) + residual
+            outputs_input = block["layer_norm_1"](outputs_input + residual)
             residual = outputs_input
-            # print("output add norm 1", outputs_input.size())
 
             # batch x seq x input_fnn_dim
             outputs_input, _ = block["att"](
@@ -149,42 +126,14 @@ class ConVEx(RobertaPreTrainedModel):
                 value=outputs_template,
                 key_padding_mask=template_attention_mask,
             )
-            # print("output attention", outputs_input.size())
             # batch x seq x input_fnn_dim
-            outputs_input = block["layer_norm_2"](outputs_input) + residual
+            outputs_input = block["layer_norm_2"](outputs_input + residual)
             residual = outputs_input
-            # print("output add norm 2", outputs_input.size())
             # batch x seq x input_fnn_dim
             outputs_input = self.activation_fn(block["fnn"](outputs_input))
-            # print("output fnn", outputs_input.size())
-            outputs_input = block["layer_norm_3"](outputs_input) + residual
-            # print("output add norm 3", outputs_input.size())
+            outputs_input = block["layer_norm_3"](outputs_input + residual)
 
         logits = self.classifier(outputs_input)
-        # print("input to crf", logits.size())
-
-        # outputs_input, _ = self.self_att(
-        #     query=outputs_input,
-        #     key=outputs_input,
-        #     value=outputs_input,
-        #     key_padding_mask=input_attention_mask,
-        # )
-
-        # outputs_input = self.layer_norm_1(outputs_input)
-
-        # outputs_input, _ = self.att(
-        #     query=outputs_input,
-        #     key=outputs_template,
-        #     value=outputs_template,
-        #     key_padding_mask=template_attention_mask,
-        # )
-
-        # outputs_input = self.layer_norm_2(outputs_input)
-
-        # # print(outputs_input.size())
-        # logits = self.classifier(outputs_input)
-
-        # logits = self.layer_norm_3(logits)
 
         # # crf
         # attention_mask = attention_mask.type(torch.ByteTensor).to(attention_mask.device)
@@ -198,8 +147,8 @@ class ConVEx(RobertaPreTrainedModel):
             )
         )
 
-        loss = -self.crf_layer(emissions=logits, tags=labels)  # , mask=attention_mask)
+        crf_loss = -self.crf_layer(emissions=logits, tags=labels)  # , mask=attention_mask)
+        # TODO: implement auxiliary loss if using the dialogue corpus. This is the similarity loss of template and input.
         tags = self.crf_layer.decode(emissions=logits)  # , mask=attention_mask)
         tags = torch.LongTensor(tags)
-        # print(tags)
-        return {"tags": tags, "loss": loss}
+        return {"tags": tags, "loss": crf_loss}
