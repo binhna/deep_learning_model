@@ -25,7 +25,7 @@ parser.add_argument("--freeze_layer_count", type=int, default=-1, help="freeze l
 parser.add_argument("--valid-path", type=str, help="path of valid data")
 parser.add_argument("--test-path", type=str, default=None, help="path of test data")
 parser.add_argument("--batch-size", type=int, default=32, help="batch size")
-parser.add_argument("--lr", type=float, default=0.003, help="learning rate")
+parser.add_argument("--lr", type=float, default=0.0001, help="learning rate")
 parser.add_argument("--epoch", type=int, default=5, help="number of epoch")
 parser.add_argument("--do-train", action="store_true")
 parser.add_argument("--do-eval", action="store_true")
@@ -56,7 +56,7 @@ parser.add_argument(
 parser.add_argument("--lower", action="store_true", help="lowercase the training data")
 parser.add_argument("--template_fnn_size", type=int, default=128)
 parser.add_argument("--input_fnn_size", type=int, default=128)
-parser.add_argument("--num_heads", type=int, default=2)
+parser.add_argument("--num_heads", type=int, default=1)
 
 
 def custom_collator(batch):

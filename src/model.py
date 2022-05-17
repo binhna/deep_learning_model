@@ -43,7 +43,7 @@ class ConVEx(RobertaPreTrainedModel):
                         "layer_norm_3": torch.nn.LayerNorm(config.input_fnn_size),
                     }
                 )
-                for _ in range(2)
+                for _ in range(1)
             ]
         )
 
